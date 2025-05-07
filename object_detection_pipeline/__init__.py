@@ -1,0 +1,1 @@
+from .object_detection_uploader import ObjectDetectionUploader, main
