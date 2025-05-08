@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 
-from uploader import create_dataset_dict, upload_to_huggingface
+from classification_pipeline.uploader import create_dataset_dict, upload_to_huggingface
 
 
 def main():
