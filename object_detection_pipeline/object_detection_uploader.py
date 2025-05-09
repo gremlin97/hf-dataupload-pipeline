@@ -889,7 +889,7 @@ source_datasets:
 task_categories:
 - object-detection
 task_ids:
-- object-detection
+- instance-segmentation
 pretty_name: {dataset_basename}
 ---
 
