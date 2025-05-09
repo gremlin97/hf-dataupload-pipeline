@@ -17,7 +17,7 @@ import glob
 DEFAULT_DATASET_INFO = {
     "description": "Mars Image Classification Dataset",
     "license": "cc-by-4.0",
-    "tags": ["mars", "planetary-science", "image-classification"],
+    "tags": ["mars", "image-classification"],
     "version": "1.0"
 }
 
@@ -510,16 +510,43 @@ def create_readme(
     # Get current date for metadata
     current_date = datetime.now().strftime("%Y-%m-%d")
     
+    # Get the basename of the dataset (the part after the last /)
+    dataset_basename = dataset_name.split('/')[-1]
+    
     # Create YAML frontmatter for the README with metadata
     readme = "---\n"
-    readme += "license: cc-by-4.0\n"
-    readme += "version: 1.0\n"
-    readme += f"date_published: {current_date}\n"
-    readme += "citation: |\n  Citation information for the forthcoming paper will be updated in September 2025 pending acceptance.\n"
+    readme += "annotations_creators:\n- expert-generated\n"
+    readme += "language_creators:\n- found\n"
+    readme += "language:\n- en\n"
+    readme += "license:\n- cc-by-4.0\n"
+    readme += "multilinguality:\n- monolingual\n"
+    readme += "size_categories:\n- 10K<n<100K\n"
+    readme += "source_datasets:\n- original\n"
+    readme += "task_categories:\n- image-classification\n"
+    readme += "task_ids:\n- multi-class-image-classification\n"
+    readme += f"pretty_name: {dataset_basename}\n"
+    
+    # Add class label names dictionary if available
+    if class_names:
+        class_label_names = {str(i): name for i, name in enumerate(class_names)}
+        readme += "dataset_info:\n"
+        readme += "  features:\n"
+        readme += "  - name: image\n"
+        readme += "    dtype: image\n"
+        readme += "  - name: label\n"
+        readme += "    dtype:\n"
+        readme += "      class_label:\n"
+        readme += "        names:\n"
+        
+        # Add class names
+        for class_id, class_name in class_label_names.items():
+            readme += f"          '{class_id}': {class_name}\n"
+    
+    # End frontmatter
     readme += "---\n\n"
     
     # Add dataset title
-    readme += f"# {dataset_name.split('/')[-1]}\n\n"
+    readme += f"# {dataset_basename}\n\n"
     
     # Add dataset description
     readme += "A Mars image classification dataset for planetary science research.\n\n"
@@ -531,7 +558,7 @@ def create_readme(
     readme += "* **License:** CC-BY-4.0 (Creative Commons Attribution 4.0 International)\n"
     readme += "* **Version:** 1.0\n"
     readme += f"* **Date Published:** {current_date}\n"
-    readme += "* **Cite As:** Citation information for the forthcoming paper will be updated in September 2025 pending acceptance.\n\n"
+    readme += "* **Cite As:** TBD\n\n"
     
     # Add class information
     readme += "## Classes\n\n"
@@ -546,7 +573,7 @@ def create_readme(
         readme += f"- **{split_name}**: {len(split_dataset)} images\n"
     readme += "\n"
     
-    # Add Few-shot splits information
+    # Add Few-shot splits information only if relevant
     few_shot_splits = [split for split in dataset_dict.keys() if 'few_shot_train_' in split]
     if few_shot_splits:
         readme += "## Few-shot Splits\n\n"
@@ -561,7 +588,7 @@ def create_readme(
                 filename = config.get("filename", "unknown")
                 readme += f"- **{filename}**\n"
                 
-    # Add Partition splits information
+    # Add Partition splits information only if relevant
     partition_splits = [split for split in dataset_dict.keys() if 'partition_train_' in split]
     if partition_splits:
         readme += "## Partition Splits\n\n"
@@ -693,84 +720,6 @@ def upload_to_huggingface(
         commit_message="Add dataset README with metadata"
     )
     
-    # Get current date for metadata
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    
-    # Create and upload dataset-metadata.jsonld for Croissant
-    metadata_jsonld = {
-        "@context": {
-            "@language": "en",
-            "@vocab": "https://schema.org/",
-            "sc": "https://schema.org/",
-            "cr": "http://mlcommons.org/croissant/",
-            "rai": "http://mlcommons.org/croissant/RAI/",
-            "dct": "http://purl.org/dc/terms/",
-            "citeAs": "cr:citeAs",
-            "column": "cr:column",
-            "conformsTo": "dct:conformsTo",
-            "data": {
-                "@id": "cr:data",
-                "@type": "@json"
-            },
-            "dataType": {
-                "@id": "cr:dataType",
-                "@type": "@vocab"
-            },
-            "examples": {
-                "@id": "cr:examples",
-                "@type": "@json"
-            },
-            "extract": "cr:extract",
-            "field": "cr:field",
-            "fileProperty": "cr:fileProperty",
-            "fileObject": "cr:fileObject",
-            "fileSet": "cr:fileSet",
-            "format": "cr:format",
-            "includes": "cr:includes",
-            "isLiveDataset": "cr:isLiveDataset",
-            "jsonPath": "cr:jsonPath",
-            "key": "cr:key",
-            "md5": "cr:md5",
-            "parentField": "cr:parentField",
-            "path": "cr:path",
-            "recordSet": "cr:recordSet",
-            "references": "cr:references",
-            "regex": "cr:regex",
-            "repeated": "cr:repeated",
-            "replace": "cr:replace",
-            "separator": "cr:separator",
-            "source": "cr:source",
-            "subField": "cr:subField",
-            "transform": "cr:transform"
-        },
-        "@type": "sc:Dataset",
-        "name": dataset_name.split('/')[-1],
-        "description": description,
-        "conformsTo": "http://mlcommons.org/croissant/1.0",
-        "citeAs": "Citation information for the forthcoming paper will be updated in September 2025 pending acceptance.",
-        "license": "https://creativecommons.org/licenses/by/4.0/",
-        "version": "1.0",
-        "datePublished": current_date,
-        "url": f"https://huggingface.co/datasets/{dataset_name}",
-        "creator": {
-            "@type": "sc:Organization",
-            "name": "Dataset Authors"
-        }
-    }
-    
-    metadata_jsonld_path = "dataset-metadata.jsonld.tmp"
-    with open(metadata_jsonld_path, "w") as f:
-        json.dump(metadata_jsonld, f, indent=2)
-        
-    api.upload_file(
-        path_or_fileobj=metadata_jsonld_path,
-        path_in_repo="dataset-metadata.jsonld",
-        repo_id=dataset_name,
-        repo_type="dataset",
-        token=token,
-        commit_message="Add Croissant metadata"
-    )
-    
     # Upload annotation and mapping files if provided
     if annotation_file or mapping_file:
         try:
@@ -804,7 +753,5 @@ def upload_to_huggingface(
     # Clean up temporary files
     if os.path.exists(readme_path):
         os.remove(readme_path)
-    if os.path.exists(metadata_jsonld_path):
-        os.remove(metadata_jsonld_path)
     
     print(f"Successfully uploaded dataset to: {dataset_name}") 

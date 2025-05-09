@@ -856,16 +856,53 @@ class ObjectDetectionUploader:
             format_name = "COCO" if self.format == "coco" else "YOLO"
             splits = list(dataset_dict.keys())
             
+            # Get current date for metadata
+            from datetime import datetime
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            
+            # Get class names for object detection
+            class_names_list = []
+            if self.format == "yolo" and self.config_file:
+                with open(self.config_file, 'r') as f:
+                    config = yaml.safe_load(f)
+                    class_names_list = config.get('names', [])
+            
+            # Get the basename of the dataset
+            dataset_basename = os.path.basename(self.dataset_name)
+            
+            # Create basic YAML frontmatter
             readme_content = f"""---
-license: mit
-tags:
+annotations_creators:
+- expert-generated
+language_creators:
+- found
+language:
+- en
+license:
+- cc-by-4.0
+multilinguality:
+- monolingual
+size_categories:
+- 10K<n<100K
+source_datasets:
+- original
+task_categories:
 - object-detection
-- computer-vision
+task_ids:
+- object-detection
+pretty_name: {dataset_basename}
 ---
 
-# {os.path.basename(self.dataset_name)} Dataset
+# {dataset_basename} Dataset
 
 An object detection dataset in {format_name} format containing {len(splits)} splits: {', '.join(splits)}.
+
+## Dataset Metadata
+
+* **License:** CC-BY-4.0 (Creative Commons Attribution 4.0 International)
+* **Version:** 1.0
+* **Date Published:** {current_date}
+* **Cite As:** TBD
 
 ## Dataset Details
 
@@ -873,19 +910,22 @@ An object detection dataset in {format_name} format containing {len(splits)} spl
 - Splits: {', '.join(splits)}
 """
             
-            if self.format == "yolo":
-                with open(self.config_file, 'r') as f:
-                    config = yaml.safe_load(f)
-                class_names = config.get('names', [])
-                readme_content += f"\n- Classes: {', '.join(class_names)}"
+            if class_names_list:
+                readme_content += f"\n- Classes: {', '.join(class_names_list)}\n"
             
             # Add information about additional formats
+            additional_formats = []
             if self.include_coco and self.format != "coco":
-                readme_content += "\n- Includes COCO format annotations"
+                additional_formats.append("COCO format annotations")
             if self.include_pascal_voc:
-                readme_content += "\n- Includes Pascal VOC format annotations"
+                additional_formats.append("Pascal VOC format annotations")
             if self.include_yolo and self.format != "yolo":
-                readme_content += "\n- Includes YOLO format annotations"
+                additional_formats.append("YOLO format annotations")
+                
+            if additional_formats:
+                readme_content += "\n## Additional Formats\n\n"
+                for fmt in additional_formats:
+                    readme_content += f"- Includes {fmt}\n"
             
             readme_content += "\n\n## Usage\n\n```python\nfrom datasets import load_dataset\n\ndataset = load_dataset(\""
             readme_content += self.dataset_name
@@ -902,7 +942,7 @@ An object detection dataset in {format_name} format containing {len(splits)} spl
             )
             print("Added dataset card to the repository.")
             
-            # Clean up local README file
+            # Clean up temporary files
             if os.path.exists("README.md"):
                 os.remove("README.md")
                 

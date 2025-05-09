@@ -285,19 +285,33 @@ class SegmentationUploader:
         from datetime import datetime
         current_date = datetime.now().strftime("%Y-%m-%d")
         
+        # Determine available splits
+        detected_splits = []
+        if dataset_dict:
+            detected_splits = list(dataset_dict.keys())
+        
+        # Get the basename of the dataset
+        dataset_basename = self.dataset_name.split('/')[-1]
+        
         # Create YAML frontmatter for the README with metadata
         readme = "---\n"
-        readme += "license: cc-by-4.0\n"
-        readme += "version: 1.0\n"
-        readme += f"date_published: {current_date}\n"
-        readme += "citation: |\n  Citation information for the forthcoming paper will be updated in September 2025 pending acceptance.\n"
+        readme += "annotations_creators:\n- expert-generated\n"
+        readme += "language_creators:\n- found\n"
+        readme += "language:\n- en\n"
+        readme += "license:\n- cc-by-4.0\n"
+        readme += "multilinguality:\n- monolingual\n"
+        readme += "size_categories:\n- 10K<n<100K\n"
+        readme += "source_datasets:\n- original\n"
+        readme += "task_categories:\n- image-segmentation\n"
+        readme += "task_ids:\n- semantic-segmentation\n"
+        readme += f"pretty_name: {dataset_basename}\n"
         readme += "---\n\n"
         
         # Add dataset title
-        readme += f"# {self.dataset_name.split('/')[-1]}\n\n"
+        readme += f"# {dataset_basename}\n\n"
         
         # Add dataset description
-        readme += "A segmentation dataset uploaded using Mars Segmentation Dataset Uploader.\n\n"
+        readme += "A segmentation dataset for planetary science applications.\n\n"
         
         # Add metadata section
         readme += "## Dataset Metadata\n\n"
@@ -306,7 +320,7 @@ class SegmentationUploader:
         readme += "* **License:** CC-BY-4.0 (Creative Commons Attribution 4.0 International)\n"
         readme += "* **Version:** 1.0\n"
         readme += f"* **Date Published:** {current_date}\n"
-        readme += "* **Cite As:** Citation information for the forthcoming paper will be updated in September 2025 pending acceptance.\n\n"
+        readme += "* **Cite As:** TBD\n\n"
         
         # Add class information
         readme += "## Classes\n\n"
@@ -321,14 +335,10 @@ class SegmentationUploader:
         readme += "```\n"
         readme += "dataset/\n"
         
-        # Add detected splits
-        splits = []
-        
-        # First determine available splits
+        # Add detected splits or use default structure
         if dataset_dict:
             for split in ['train', 'val', 'test']:
                 if split in dataset_dict:
-                    splits.append(split)
                     readme += f"  ├── {split}/\n"
                     readme += f"  │   ├── images/  # Image files\n"
                     readme += f"  │   └── masks/   # Segmentation masks\n"
@@ -345,10 +355,9 @@ class SegmentationUploader:
         # Add split statistics
         if dataset_dict:
             readme += "## Statistics\n\n"
-            for split in splits:
-                if split in dataset_dict:
-                    count = len(dataset_dict[split])
-                    readme += f"- {split}: {count} images\n"
+            for split in detected_splits:
+                count = len(dataset_dict[split])
+                readme += f"- {split}: {count} images\n"
             readme += "\n"
         
         # Add usage example
@@ -438,153 +447,9 @@ class SegmentationUploader:
             repo_type="dataset"
         )
         
-        # Create and upload dataset-metadata.jsonld for Croissant
-        metadata_jsonld = {
-            "@context": {
-                "@language": "en",
-                "@vocab": "https://schema.org/",
-                "sc": "https://schema.org/",
-                "cr": "http://mlcommons.org/croissant/",
-                "rai": "http://mlcommons.org/croissant/RAI/",
-                "dct": "http://purl.org/dc/terms/",
-                "citeAs": "cr:citeAs",
-                "column": "cr:column",
-                "conformsTo": "dct:conformsTo",
-                "data": {
-                    "@id": "cr:data",
-                    "@type": "@json"
-                },
-                "dataType": {
-                    "@id": "cr:dataType",
-                    "@type": "@vocab"
-                },
-                "examples": {
-                    "@id": "cr:examples",
-                    "@type": "@json"
-                },
-                "extract": "cr:extract",
-                "field": "cr:field",
-                "fileProperty": "cr:fileProperty",
-                "fileObject": "cr:fileObject",
-                "fileSet": "cr:fileSet",
-                "format": "cr:format",
-                "includes": "cr:includes",
-                "isLiveDataset": "cr:isLiveDataset",
-                "jsonPath": "cr:jsonPath",
-                "key": "cr:key",
-                "md5": "cr:md5",
-                "parentField": "cr:parentField",
-                "path": "cr:path",
-                "recordSet": "cr:recordSet",
-                "references": "cr:references",
-                "regex": "cr:regex",
-                "repeated": "cr:repeated",
-                "replace": "cr:replace",
-                "separator": "cr:separator",
-                "source": "cr:source",
-                "subField": "cr:subField",
-                "transform": "cr:transform"
-            },
-            "@type": "sc:Dataset",
-            "name": self.dataset_name.split('/')[-1],
-            "description": f"Segmentation dataset with {len(self.class_names)} classes (images and masks).",
-            "conformsTo": "http://mlcommons.org/croissant/1.0",
-            "citeAs": "Citation information for the forthcoming paper will be updated in September 2025 pending acceptance.",
-            "license": "https://creativecommons.org/licenses/by/4.0/",
-            "version": "1.0",
-            "datePublished": current_date,
-            "url": f"https://huggingface.co/datasets/{self.dataset_name}",
-            "creator": {
-                "@type": "sc:Organization",
-                "name": "Dataset Authors"
-            },
-            "distribution": [
-                {
-                    "@type": "cr:FileObject",
-                    "@id": "dataset-zip",
-                    "name": "Dataset archive",
-                    "contentUrl": f"https://huggingface.co/datasets/{self.dataset_name}",
-                    "encodingFormat": "application/zip"
-                },
-                {
-                    "@type": "cr:FileSet",
-                    "@id": "image-files",
-                    "name": "Images",
-                    "containedIn": {
-                        "@id": "dataset-zip"
-                    },
-                    "encodingFormat": "image/png",
-                    "includes": "**/images/*.png"
-                },
-                {
-                    "@type": "cr:FileSet",
-                    "@id": "mask-files",
-                    "name": "Masks",
-                    "containedIn": {
-                        "@id": "dataset-zip"
-                    },
-                    "encodingFormat": "image/png",
-                    "includes": "**/masks/*.png"
-                }
-            ],
-            "recordSet": [
-                {
-                    "@type": "cr:RecordSet",
-                    "@id": "segmentation_data",
-                    "name": "Segmentation Data",
-                    "description": "Pairs of images and masks for segmentation training.",
-                    "field": [
-                        {
-                            "@type": "cr:Field",
-                            "@id": "segmentation_data/input_image",
-                            "name": "input_image",
-                            "description": "Input image for segmentation",
-                            "dataType": "sc:ImageObject",
-                            "source": {
-                                "fileSet": {
-                                    "@id": "image-files"
-                                },
-                                "extract": {
-                                    "fileProperty": "content"
-                                }
-                            }
-                        },
-                        {
-                            "@type": "cr:Field",
-                            "@id": "segmentation_data/mask",
-                            "name": "mask",
-                            "description": "Segmentation mask corresponding to the input image",
-                            "dataType": "sc:ImageObject",
-                            "source": {
-                                "fileSet": {
-                                    "@id": "mask-files"
-                                },
-                                "extract": {
-                                    "fileProperty": "content"
-                                }
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-        
-        metadata_jsonld_path = "dataset-metadata.jsonld.tmp"
-        with open(metadata_jsonld_path, "w") as f:
-            json.dump(metadata_jsonld, f, indent=2)
-            
-        self.api.upload_file(
-            path_or_fileobj=metadata_jsonld_path,
-            path_in_repo="dataset-metadata.jsonld",
-            repo_id=self.dataset_name,
-            repo_type="dataset"
-        )
-        
         # Clean up temporary files
         if os.path.exists(readme_path):
             os.remove(readme_path)
-        if os.path.exists(metadata_jsonld_path):
-            os.remove(metadata_jsonld_path)
         
         print(f"Segmentation dataset uploaded successfully to: https://huggingface.co/datasets/{self.dataset_name}")
 

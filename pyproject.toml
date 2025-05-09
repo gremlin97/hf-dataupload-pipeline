@@ -1,10 +1,14 @@
 [tool.poetry]
 name = "mars-dataset-uploader"
-version = "0.1.0"
+version = "1.0"
 description = "A tool for uploading Mars image classification datasets to Hugging Face"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-packages = [{include = "classification_pipeline"}]
+packages = [
+    {include = "classification_pipeline"},
+    {include = "object_detection_pipeline"},
+    {include = "segmentation_dataset_uploader"}
+]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -33,6 +37,8 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 mars-dataset-uploader = "classification_pipeline.cli:main"
+mars-object-detection-uploader = "object_detection_pipeline:main"
+mars-segmentation-uploader = "segmentation_dataset_uploader:main"
 
 [tool.black]
 line-length = 88
