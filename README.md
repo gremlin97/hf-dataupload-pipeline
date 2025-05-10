@@ -76,7 +76,41 @@ python -m classification_pipeline.cli \
 - `--private`: Make the dataset private
 - `--debug`: Enable debug mode with additional logging
 
-### 2. Object Detection Dataset Upload
+### 2. Multi-Label Classification Dataset Upload
+
+Upload a multi-label classification dataset to Hugging Face, where images can belong to multiple classes simultaneously:
+
+```bash
+poetry run python -m multi_label_classification_pipeline.cli \
+  --dataset-name your-username/dataset-name \
+  --data-dir /path/to/multi_label/data \
+  --annotation-file /path/to/annotation.csv \
+  --mapping-file /path/to/mapping.json \
+  --few-shot-dir /path/to/few_shot \
+  --token your_huggingface_token \
+  [--private] \
+  [--text-column file_id] \
+  [--label-column label] \
+  [--feature-name-column feature_name] \
+  [--split-column split]
+```
+
+#### Required Arguments:
+- `--dataset-name`: Name for the dataset on Hugging Face (username/dataset-name)
+- `--data-dir`: Path to the directory containing images
+- `--annotation-file`: Path to CSV file with annotations
+- `--token`: Hugging Face API token
+
+#### Optional Arguments:
+- `--mapping-file`: Path to JSON file mapping class IDs to names
+- `--few-shot-dir`: Directory containing few-shot CSV files
+- `--private`: Make the dataset private
+- `--text-column`: Name of the column containing image filenames (default: "file_id")
+- `--label-column`: Name of the column containing labels (default: "label")
+- `--feature-name-column`: Name of the column containing feature names (default: "feature_name")
+- `--split-column`: Name of the column containing split information (default: "split")
+
+### 3. Object Detection Dataset Upload
 
 Upload an object detection dataset (COCO or YOLO format) to Hugging Face:
 
@@ -106,7 +140,7 @@ python -m object_detection_pipeline.object_detection_uploader \
 - `--include_coco`: Include COCO format annotations as a column
 - `--include_yolo`: Include YOLO format annotations as a column
 
-### 3. Segmentation Dataset Upload
+### 4. Segmentation Dataset Upload
 
 Upload a segmentation dataset to Hugging Face:
 
@@ -144,6 +178,18 @@ python -m classification_pipeline.cli \
   --partition_dir /path/to/DoMars16K/partitions \
   --class_names aec ael cli cra fse fsf fsg fss mix rid rou sfe sfx smo tex \
   --mapping_file /path/to/DoMars16K/mapping.json
+```
+
+### Multi-Label Classification Example
+
+```bash
+poetry run python -m multi_label_classification_pipeline.cli \
+  --dataset-name username/mars-multi-label-classification \
+  --data-dir multi_label_mer/data \
+  --annotation-file multi_label_mer/annotation.csv \
+  --mapping-file multi_label_mer/mapping.json \
+  --few-shot-dir multi_label_mer/few_shot \
+  --token hf_your_token_here
 ```
 
 ### Object Detection Example
