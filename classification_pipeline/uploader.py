@@ -359,14 +359,48 @@ def create_dataset_dict(
                 split_df = df[df[split_column] == split].copy()
                 if not split_df.empty:
                     # Create the image column with full paths and prepare data dictionary
-                    data_dict = {
-                        'image': [os.path.join(data_dir, split, str(row[label_column]), row[text_column]) for _, row in split_df.iterrows()],
-                        'label': split_df[label_column].tolist()
-                    }
-                    dataset_dict[split] = Dataset.from_dict(
-                        data_dict,
-                        features=features
-                    )
+                    # We need to convert numeric label to class name
+                    data_dict = {}
+                    
+                    # Get image paths using class names instead of numeric labels
+                    image_paths = []
+                    for _, row in split_df.iterrows():
+                        label_val = row[label_column]
+                        # Check if we have class names to map this label
+                        if class_names and 0 <= label_val < len(class_names):
+                            # Use the class name from the mapping instead of the numeric label
+                            class_name = class_names[label_val]
+                            image_path = os.path.join(data_dir, split, class_name, row[text_column])
+                        else:
+                            # Fallback to using the label value directly
+                            image_path = os.path.join(data_dir, split, str(label_val), row[text_column])
+                        
+                        # Verify that the image exists
+                        if not os.path.exists(image_path):
+                            print(f"Warning: Image not found: {image_path}")
+                            # Try alternate path without class subdirectory
+                            alt_path = os.path.join(data_dir, split, row[text_column])
+                            if os.path.exists(alt_path):
+                                print(f"Found image at alternate path: {alt_path}")
+                                image_path = alt_path
+                            else:
+                                # If image doesn't exist, we might want to skip it
+                                continue
+                        
+                        image_paths.append(image_path)
+                    
+                    # Create data dictionary with images that exist
+                    if image_paths:
+                        data_dict = {
+                            'image': image_paths,
+                            'label': [split_df.iloc[i][label_column] for i in range(len(image_paths))]
+                        }
+                        dataset_dict[split] = Dataset.from_dict(
+                            data_dict,
+                            features=features
+                        )
+                    else:
+                        print(f"Warning: No valid images found for split {split}")
         except Exception as e:
             print(f"Error reading annotation file: {e}")
             import traceback
@@ -397,16 +431,45 @@ def create_dataset_dict(
                             all_few_shot_configs.append(config_info)
                             
                             # Create dataset using the same path construction as for the main dataset
-                            data_dict = {
-                                'image': [os.path.join(data_dir, 'train', str(row[label_column]), row[text_column]) for _, row in train_df.iterrows()],
-                                'label': train_df[label_column].tolist()
-                            }
-                            dataset_dict[few_shot_split_name] = Dataset.from_dict(
-                                data_dict,
-                                features=features
-                            )
-                        else:
-                            print(f"Warning: No train examples found in few-shot file: {few_shot_file}")
+                            image_paths = []
+                            labels = []
+                            
+                            for _, row in train_df.iterrows():
+                                label_val = row[label_column]
+                                # Check if we have class names to map this label
+                                if class_names and 0 <= label_val < len(class_names):
+                                    # Use the class name from the mapping instead of the numeric label
+                                    class_name = class_names[label_val]
+                                    image_path = os.path.join(data_dir, 'train', class_name, row[text_column])
+                                else:
+                                    # Fallback to using the label value directly
+                                    image_path = os.path.join(data_dir, 'train', str(label_val), row[text_column])
+                                
+                                # Verify that the image exists
+                                if not os.path.exists(image_path):
+                                    # Try alternate path without class subdirectory
+                                    alt_path = os.path.join(data_dir, 'train', row[text_column])
+                                    if os.path.exists(alt_path):
+                                        image_path = alt_path
+                                    else:
+                                        # Skip missing images
+                                        continue
+                                
+                                image_paths.append(image_path)
+                                labels.append(label_val)
+                            
+                            if image_paths:
+                                data_dict = {
+                                    'image': image_paths,
+                                    'label': labels
+                                }
+                                dataset_dict[few_shot_split_name] = Dataset.from_dict(
+                                    data_dict,
+                                    features=features
+                                )
+                                print(f"Created {few_shot_split_name} dataset with {len(image_paths)} examples")
+                            else:
+                                print(f"Warning: No valid images found for few_shot file {few_shot_file}")
                     else:
                         # Legacy format - JSON file with {"train": {"class": [img, ...]}}
                         with open(few_shot_file, 'r') as f:
@@ -488,16 +551,45 @@ def create_dataset_dict(
                             all_partition_configs.append(config_info)
                             
                             # Create dataset using the same path construction as for the main dataset
-                            data_dict = {
-                                'image': [os.path.join(data_dir, 'train', str(row[label_column]), row[text_column]) for _, row in train_df.iterrows()],
-                                'label': train_df[label_column].tolist()
-                            }
-                            dataset_dict[partition_split_name] = Dataset.from_dict(
-                                data_dict,
-                                features=features
-                            )
-                        else:
-                            print(f"Warning: No train examples found in partition file: {partition_file}")
+                            image_paths = []
+                            labels = []
+                            
+                            for _, row in train_df.iterrows():
+                                label_val = row[label_column]
+                                # Check if we have class names to map this label
+                                if class_names and 0 <= label_val < len(class_names):
+                                    # Use the class name from the mapping instead of the numeric label
+                                    class_name = class_names[label_val]
+                                    image_path = os.path.join(data_dir, 'train', class_name, row[text_column])
+                                else:
+                                    # Fallback to using the label value directly
+                                    image_path = os.path.join(data_dir, 'train', str(label_val), row[text_column])
+                                
+                                # Verify that the image exists
+                                if not os.path.exists(image_path):
+                                    # Try alternate path without class subdirectory
+                                    alt_path = os.path.join(data_dir, 'train', row[text_column])
+                                    if os.path.exists(alt_path):
+                                        image_path = alt_path
+                                    else:
+                                        # Skip missing images
+                                        continue
+                                
+                                image_paths.append(image_path)
+                                labels.append(label_val)
+                            
+                            if image_paths:
+                                data_dict = {
+                                    'image': image_paths,
+                                    'label': labels
+                                }
+                                dataset_dict[partition_split_name] = Dataset.from_dict(
+                                    data_dict,
+                                    features=features
+                                )
+                                print(f"Created {partition_split_name} dataset with {len(image_paths)} examples")
+                            else:
+                                print(f"Warning: No valid images found for partition file {partition_file}")
                     else:
                         # Legacy format - JSON file with {"train": {"class": [img, ...]}}
                         with open(partition_file, 'r') as f:
