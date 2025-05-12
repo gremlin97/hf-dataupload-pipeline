@@ -689,129 +689,101 @@ def upload_to_huggingface(
     mapping_file: Optional[str] = None
 ) -> None:
     """
-    Upload a dataset to Hugging Face.
+    Upload the dataset to Hugging Face.
     
     Args:
         dataset_dict: DatasetDict to upload
-        dataset_name: Name for the dataset on Hugging Face
+        dataset_name: Name for dataset on Hugging Face
         token: Hugging Face API token
         private: Whether to make the dataset private
         dataset_info: Optional dictionary containing dataset metadata
-        class_names: List of class names for the dataset
-        few_shot_configs: List of few-shot configuration dictionaries (with filename info)
-        partition_configs: List of partition configuration dictionaries (with filename info)
-        annotation_file: Path to the annotation file to upload (optional)
-        mapping_file: Path to the mapping file to upload (optional)
+        class_names: List of class names
+        few_shot_configs: List of few-shot configuration dictionaries
+        partition_configs: List of partition configuration dictionaries
+        annotation_file: Path to annotation file to upload
+        mapping_file: Path to mapping file to upload
     """
-    info = dataset_info or DEFAULT_DATASET_INFO.copy()
+    from huggingface_hub import HfApi
     
-    # Prepare commit description
-    description = info.get("description", "Mars Image Classification Dataset")
-    if class_names:
-        description += f"\nClasses: {', '.join(class_names)}"
-        
-    # Add info about few-shot splits
-    few_shot_splits = [split for split in dataset_dict.keys() if 'few_shot_train_' in split]
-    if few_shot_splits:
-        description += f"\n\n--- Few-shot Splits ---"
-        description += f"\nDetected splits: {', '.join(few_shot_splits)}"
-        if few_shot_configs:
-             description += "\n\nConfigurations:" 
-             for fs_config_info in few_shot_configs:
-                 filename = fs_config_info.get("filename", "unknown_file")
-                 config_data = fs_config_info.get("config", {})
-                 description += f"\n\n* File: {filename}"
-                 description += f"\n{json.dumps(config_data, indent=2)}"
-        else:
-             description += "\n(Few-shot configuration data not provided)"
-
-    # Add info about partition splits
-    partition_splits = [split for split in dataset_dict.keys() if 'partition_train_' in split]
-    if partition_splits:
-        description += f"\n\n--- Partition Splits (Train Only) ---"
-        description += f"\nDetected splits: {', '.join(partition_splits)}"
-        if partition_configs:
-            description += "\n\nConfigurations:"
-            for p_config_info in partition_configs:
-                filename = p_config_info.get("filename", "unknown_file")
-                config_data = p_config_info.get("config", {})
-                description += f"\n\n* File: {filename}"
-                description += f"\n{json.dumps(config_data, indent=2)}"
-        else:
-            description += "\n(Partition configuration data not provided)"
-
-    # Initialize the API client
-    api = huggingface_hub.HfApi()
-
-    # Check if repository exists, create it if not
+    # Create API object
+    api = HfApi(token=token)
+    
+    # First check if dataset exists - if not, create it
     try:
-        api.repo_info(repo_id=dataset_name, repo_type="dataset")
-    except huggingface_hub.utils._errors.RepositoryNotFoundError:
-        print(f"Repository {dataset_name} not found. Creating new repository...")
-        api.create_repo(repo_id=dataset_name, repo_type="dataset", private=private)
-
-    # Upload to hub
-    dataset_dict.push_to_hub(
-        repo_id=dataset_name,
-        token=token,
-        private=private,
-        commit_message="Upload Mars classification dataset",
-        commit_description=description
-    )
-    
-    # Create and upload README.md
-    readme_content = create_readme(
-        dataset_name=dataset_name,
-        dataset_dict=dataset_dict,
-        class_names=class_names,
-        few_shot_configs=few_shot_configs,
-        partition_configs=partition_configs
-    )
-    readme_path = "README.md.tmp"
-    with open(readme_path, "w") as f:
-        f.write(readme_content)
-        
-    api.upload_file(
-        path_or_fileobj=readme_path,
-        path_in_repo="README.md",
-        repo_id=dataset_name,
-        repo_type="dataset",
-        token=token,
-        commit_message="Add dataset README with metadata"
-    )
-    
-    # Upload annotation and mapping files if provided
-    if annotation_file or mapping_file:
+        # Try to get repository info
         try:
-            if annotation_file and os.path.exists(annotation_file):
-                annotation_filename = os.path.basename(annotation_file)
-                print(f"Uploading annotation file: {annotation_filename}")
-                api.upload_file(
-                    path_or_fileobj=annotation_file,
-                    path_in_repo=annotation_filename,  # Upload to root directory
-                    repo_id=dataset_name,
-                    repo_type="dataset",
-                    token=token,
-                    commit_message=f"Add annotation file: {annotation_filename}"
-                )
-            
-            if mapping_file and os.path.exists(mapping_file):
-                mapping_filename = os.path.basename(mapping_file)
-                print(f"Uploading mapping file: {mapping_filename}")
-                api.upload_file(
-                    path_or_fileobj=mapping_file,
-                    path_in_repo=mapping_filename,  # Upload to root directory
-                    repo_id=dataset_name,
-                    repo_type="dataset",
-                    token=token,
-                    commit_message=f"Add mapping file: {mapping_filename}"
-                )
+            api.repo_info(repo_id=dataset_name, repo_type="dataset")
+            print(f"Dataset repository {dataset_name} already exists")
         except Exception as e:
-            print(f"Error uploading additional files: {str(e)}")
-            print("The dataset was uploaded successfully, but there was an error uploading the additional files.")
-    
-    # Clean up temporary files
-    if os.path.exists(readme_path):
-        os.remove(readme_path)
-    
-    print(f"Successfully uploaded dataset to: {dataset_name}") 
+            # If repository not found, create it
+            print(f"Creating new dataset repository: {dataset_name}")
+            api.create_repo(
+                repo_id=dataset_name,
+                repo_type="dataset",
+                private=private,
+                exist_ok=True
+            )
+        
+        # Create README content
+        readme_content = create_readme(
+            dataset_name=dataset_name,
+            dataset_dict=dataset_dict,
+            class_names=class_names,
+            few_shot_configs=few_shot_configs,
+            partition_configs=partition_configs
+        )
+        
+        # Write README to a temporary file
+        with open("README.md", "w") as f:
+            f.write(readme_content)
+        
+        # Push dataset to Hub
+        print(f"Pushing dataset to Hugging Face Hub: {dataset_name}")
+        dataset_dict.push_to_hub(
+            dataset_name,
+            token=token,
+            private=private
+        )
+        
+        # Upload README file
+        print("Uploading README.md file")
+        api.upload_file(
+            path_or_fileobj="README.md",
+            path_in_repo="README.md",
+            repo_id=dataset_name,
+            repo_type="dataset"
+        )
+        
+        # Upload source data files if available
+        if annotation_file and os.path.exists(annotation_file):
+            print(f"Uploading annotation file: {annotation_file}")
+            api.upload_file(
+                path_or_fileobj=annotation_file,
+                path_in_repo=os.path.basename(annotation_file),
+                repo_id=dataset_name,
+                repo_type="dataset"
+            )
+        
+        if mapping_file and os.path.exists(mapping_file):
+            print(f"Uploading mapping file: {mapping_file}")
+            api.upload_file(
+                path_or_fileobj=mapping_file,
+                path_in_repo=os.path.basename(mapping_file),
+                repo_id=dataset_name,
+                repo_type="dataset"
+            )
+        
+        # Clean up temporary files
+        if os.path.exists("README.md"):
+            os.remove("README.md")
+            
+        print(f"Successfully uploaded dataset to {dataset_name}")
+        
+    except Exception as e:
+        print(f"Error uploading dataset: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Clean up any temporary files
+        if os.path.exists("README.md"):
+            os.remove("README.md") 
