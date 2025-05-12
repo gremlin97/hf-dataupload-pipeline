@@ -63,7 +63,7 @@ def create_dataset_info(
 def create_dataset_dict(
     annotation_file: str,
     data_dir: str,
-    text_column: str = "image_path",
+    text_column: str = "file_id",
     label_column: str = "label",
     split_column: str = "split",
     class_names: Optional[List[str]] = None,
@@ -81,12 +81,12 @@ def create_dataset_dict(
     Args:
         annotation_file: Path to the annotation CSV file
         data_dir: Path to the data directory containing images
-        text_column: Name of the image path column
+        text_column: Name of the image path column (defaults to 'file_id' for new format)
         label_column: Name of the label column
         split_column: Name of the split column
         class_names: List of class names (e.g., ['crater', 'dust_devil', 'rock'])
         num_classes: Number of classes (if class_names not provided)
-        few_shot_files: List of paths to few-shot JSON files (optional)
+        few_shot_files: List of paths to few-shot CSV files (optional)
         partition_files: List of paths to partition JSON files (optional)
         dataset_info: Optional dictionary containing dataset metadata
         mapping_file: Optional path to mapping file
@@ -360,7 +360,7 @@ def create_dataset_dict(
                 if not split_df.empty:
                     # Create the image column with full paths and prepare data dictionary
                     data_dict = {
-                        'image': [os.path.join(data_dir, split, x) for x in split_df[text_column]],
+                        'image': [os.path.join(data_dir, split, str(row[label_column]), row[text_column]) for _, row in split_df.iterrows()],
                         'label': split_df[label_column].tolist()
                     }
                     dataset_dict[split] = Dataset.from_dict(
@@ -378,44 +378,71 @@ def create_dataset_dict(
     if few_shot_files:
         for few_shot_file in few_shot_files:
             if os.path.exists(few_shot_file):
-                with open(few_shot_file, 'r') as f:
-                    try:
-                        few_shot_data = json.load(f)
-                        # Store config with filename info for tracking
-                        config_info = {"filename": os.path.basename(few_shot_file), "config": few_shot_data}
-                        all_few_shot_configs.append(config_info)
+                try:
+                    # Extract file prefix for split name (e.g., "10_shot" from "10_shot.csv" or "10_shot.json")
+                    file_prefix = os.path.splitext(os.path.basename(few_shot_file))[0]
+                    few_shot_split_name = f"few_shot_train_{file_prefix}"
+                    
+                    # Check if this is a CSV file (new format) or JSON file (old format)
+                    if few_shot_file.endswith('.csv'):
+                        # New format - CSV file similar to annotation file
+                        few_shot_df = pd.read_csv(few_shot_file)
+                        print(f"Loaded few-shot file {few_shot_file} with {len(few_shot_df)} rows")
                         
-                        # Extract file prefix for split name (e.g., "10_shot" from "10_shot.json")
-                        file_prefix = os.path.splitext(os.path.basename(few_shot_file))[0]
-                        few_shot_split_name = f"few_shot_train_{file_prefix}"
-
-                        # Create few-shot dataset only for training data
-                        if 'train' in few_shot_data: # Assuming structure {"train": {"class": [img, ...]}}
-                            examples = []
-                            for class_idx, class_name in enumerate(class_names):
-                                if class_name in few_shot_data['train']:
-                                    examples.extend([
-                                        {
-                                            'image': os.path.join(data_dir, 'train', class_name, image_name),
-                                            'label': class_idx
-                                        }
-                                        for image_name in few_shot_data['train'][class_name]
-                                        # Add existence check?
-                                        # if os.path.exists(os.path.join(data_dir, 'train', class_name, image_name))
-                                    ])
+                        # Filter for train split
+                        train_df = few_shot_df[few_shot_df[split_column] == 'train'].copy()
+                        if not train_df.empty:
+                            # Store config with filename info for tracking
+                            config_info = {"filename": os.path.basename(few_shot_file), "config": {"train": f"{len(train_df)} examples"}}
+                            all_few_shot_configs.append(config_info)
                             
-                            if examples:
-                                dataset_dict[few_shot_split_name] = Dataset.from_list(
-                                    examples,
-                                    features=features
-                                )
-                            else:
-                                print(f"Warning: No valid training examples found for few-shot file: {few_shot_file}")
+                            # Create dataset using the same path construction as for the main dataset
+                            data_dict = {
+                                'image': [os.path.join(data_dir, 'train', str(row[label_column]), row[text_column]) for _, row in train_df.iterrows()],
+                                'label': train_df[label_column].tolist()
+                            }
+                            dataset_dict[few_shot_split_name] = Dataset.from_dict(
+                                data_dict,
+                                features=features
+                            )
                         else:
-                            print(f"Warning: 'train' key not found in few-shot file: {few_shot_file}")
-
-                    except json.JSONDecodeError:
-                        print(f"Warning: Could not decode JSON from few-shot file: {few_shot_file}")
+                            print(f"Warning: No train examples found in few-shot file: {few_shot_file}")
+                    else:
+                        # Legacy format - JSON file with {"train": {"class": [img, ...]}}
+                        with open(few_shot_file, 'r') as f:
+                            few_shot_data = json.load(f)
+                            # Store config with filename info for tracking
+                            config_info = {"filename": os.path.basename(few_shot_file), "config": few_shot_data}
+                            all_few_shot_configs.append(config_info)
+                            
+                            # Create few-shot dataset only for training data
+                            if 'train' in few_shot_data: # Assuming structure {"train": {"class": [img, ...]}}
+                                examples = []
+                                for class_idx, class_name in enumerate(class_names):
+                                    if class_name in few_shot_data['train']:
+                                        examples.extend([
+                                            {
+                                                'image': os.path.join(data_dir, 'train', class_name, image_name),
+                                                'label': class_idx
+                                            }
+                                            for image_name in few_shot_data['train'][class_name]
+                                            # Add existence check?
+                                            # if os.path.exists(os.path.join(data_dir, 'train', class_name, image_name))
+                                        ])
+                                
+                                if examples:
+                                    dataset_dict[few_shot_split_name] = Dataset.from_list(
+                                        examples,
+                                        features=features
+                                    )
+                                else:
+                                    print(f"Warning: No valid training examples found for few-shot file: {few_shot_file}")
+                            else:
+                                print(f"Warning: 'train' key not found in few-shot file: {few_shot_file}")
+                except Exception as e:
+                    print(f"Error processing few-shot file {few_shot_file}: {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 print(f"Warning: Few-shot file path not found: {few_shot_file}")
 
@@ -433,51 +460,84 @@ def create_dataset_dict(
         
         for partition_file in partition_files:
             if os.path.exists(partition_file):
-                with open(partition_file, 'r') as f:
-                    try:
-                        partition_data = json.load(f)
-                        # Store config with filename info
-                        config_info = {"filename": os.path.basename(partition_file), "config": partition_data}
-                        all_partition_configs.append(config_info)
-
-                        # Extract file prefix (e.g., "0.02x" from "0.02x_partition.json")
-                        # Improved prefix extraction to handle potential variations
-                        base = os.path.basename(partition_file)
-                        if base.endswith('_partition.json'):
-                            file_prefix = base[:-len('_partition.json')]
-                        elif base.endswith('.json'):
-                            file_prefix = base[:-len('.json')]
-                        else:
-                            file_prefix = base # Fallback
-                        partition_split_name = f"partition_train_{file_prefix}"
-
-                        partition_train_examples = []
+                try:
+                    # Extract file prefix (e.g., "0.02x" from "0.02x_partition.json")
+                    # Improved prefix extraction to handle potential variations
+                    base = os.path.basename(partition_file)
+                    if base.endswith('_partition.json'):
+                        file_prefix = base[:-len('_partition.json')]
+                    elif base.endswith('.json'):
+                        file_prefix = base[:-len('.json')]
+                    elif base.endswith('.csv'):
+                        file_prefix = base[:-len('.csv')]
+                    else:
+                        file_prefix = base # Fallback
+                    partition_split_name = f"partition_train_{file_prefix}"
+                    
+                    # Check if this is a CSV file (new format) or JSON file (old format)
+                    if partition_file.endswith('.csv'):
+                        # New format - CSV file similar to annotation file
+                        partition_df = pd.read_csv(partition_file)
+                        print(f"Loaded partition file {partition_file} with {len(partition_df)} rows")
                         
-                        # Use similar approach to few_shot files for simplicity and consistency
-                        if 'train' in partition_data and isinstance(partition_data['train'], dict):
-                            for class_idx, class_name in enumerate(class_names):
-                                if class_name in partition_data['train'] and isinstance(partition_data['train'][class_name], list):
-                                    partition_train_examples.extend([
-                                        {
-                                            'image': os.path.join(data_dir, 'train', class_name, image_name),
-                                            'label': class_idx
-                                        }
-                                        for image_name in partition_data['train'][class_name]
-                                        if os.path.exists(os.path.join(data_dir, 'train', class_name, image_name))
-                                    ])
-                        else:
-                            print(f"  Warning: Key 'train' not found or its value is not a dictionary in {partition_file}. Cannot extract basenames for partition.")
-
-                        if partition_train_examples:
-                            dataset_dict[partition_split_name] = Dataset.from_list(
-                                partition_train_examples,
+                        # Filter for train split
+                        train_df = partition_df[partition_df[split_column] == 'train'].copy()
+                        if not train_df.empty:
+                            # Store config with filename info for tracking
+                            config_info = {"filename": os.path.basename(partition_file), "config": {"train": f"{len(train_df)} examples"}}
+                            all_partition_configs.append(config_info)
+                            
+                            # Create dataset using the same path construction as for the main dataset
+                            data_dict = {
+                                'image': [os.path.join(data_dir, 'train', str(row[label_column]), row[text_column]) for _, row in train_df.iterrows()],
+                                'label': train_df[label_column].tolist()
+                            }
+                            dataset_dict[partition_split_name] = Dataset.from_dict(
+                                data_dict,
                                 features=features
                             )
                         else:
-                            print(f"Warning: No valid train images found for partition defined in {partition_file}")
+                            print(f"Warning: No train examples found in partition file: {partition_file}")
+                    else:
+                        # Legacy format - JSON file with {"train": {"class": [img, ...]}}
+                        with open(partition_file, 'r') as f:
+                            try:
+                                partition_data = json.load(f)
+                                # Store config with filename info
+                                config_info = {"filename": os.path.basename(partition_file), "config": partition_data}
+                                all_partition_configs.append(config_info)
 
-                    except json.JSONDecodeError:
-                        print(f"Warning: Could not decode JSON from partition file: {partition_file}")
+                                partition_train_examples = []
+                                
+                                # Use similar approach to few_shot files for simplicity and consistency
+                                if 'train' in partition_data and isinstance(partition_data['train'], dict):
+                                    for class_idx, class_name in enumerate(class_names):
+                                        if class_name in partition_data['train'] and isinstance(partition_data['train'][class_name], list):
+                                            partition_train_examples.extend([
+                                                {
+                                                    'image': os.path.join(data_dir, 'train', class_name, image_name),
+                                                    'label': class_idx
+                                                }
+                                                for image_name in partition_data['train'][class_name]
+                                                if os.path.exists(os.path.join(data_dir, 'train', class_name, image_name))
+                                            ])
+                                else:
+                                    print(f"Warning: Key 'train' not found or its value is not a dictionary in {partition_file}. Cannot extract basenames for partition.")
+
+                                if partition_train_examples:
+                                    dataset_dict[partition_split_name] = Dataset.from_list(
+                                        partition_train_examples,
+                                        features=features
+                                    )
+                                else:
+                                    print(f"Warning: No valid train images found for partition defined in {partition_file}")
+
+                            except json.JSONDecodeError:
+                                print(f"Warning: Could not decode JSON from partition file: {partition_file}")
+                except Exception as e:
+                    print(f"Error processing partition file {partition_file}: {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 print(f"Warning: Partition file path not found: {partition_file}")
 

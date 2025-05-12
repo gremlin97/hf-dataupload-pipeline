@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--private", action="store_true", help="Make dataset private")
     parser.add_argument("--class_names", nargs="+", help="List of class names")
     parser.add_argument("--num_classes", type=int, help="Number of classes if class_names not provided")
-    parser.add_argument("--text_column", default="image_path", help="Column name for image paths")
+    parser.add_argument("--text_column", default="file_id", help="Column name for image paths")
     parser.add_argument("--label_column", default="label", help="Column name for labels")
     parser.add_argument("--split_column", default="split", help="Column name for splits")
     parser.add_argument("--few_shot_dir", help="Directory containing few-shot JSON files")
@@ -68,7 +68,7 @@ def main():
         if not os.path.exists(args.mapping_file):
             print(f"Warning: Mapping file '{args.mapping_file}' doesn't exist!")
     
-    # Find JSON files in the specified directories
+    # Find JSON and CSV files in the specified directories
     few_shot_files = []
     if args.few_shot_dir:
         if not os.path.isabs(args.few_shot_dir):
@@ -76,7 +76,8 @@ def main():
             
         if os.path.isdir(args.few_shot_dir):
             few_shot_files = [os.path.join(args.few_shot_dir, f) 
-                            for f in os.listdir(args.few_shot_dir) if f.endswith('.json')]
+                            for f in os.listdir(args.few_shot_dir) 
+                            if f.endswith('.json') or f.endswith('.csv')]
             print(f"Found {len(few_shot_files)} few-shot files in {args.few_shot_dir}")
         else:
             print(f"Warning: --few_shot_dir provided ('{args.few_shot_dir}') but it is not a valid directory. Skipping.")
@@ -88,7 +89,8 @@ def main():
             
         if os.path.isdir(args.partition_dir):
             partition_files = [os.path.join(args.partition_dir, f) 
-                            for f in os.listdir(args.partition_dir) if f.endswith('.json')]
+                            for f in os.listdir(args.partition_dir) 
+                            if f.endswith('.json') or f.endswith('.csv')]
             print(f"Found {len(partition_files)} partition files in {args.partition_dir}")
         else:
             print(f"Warning: --partition_dir provided ('{args.partition_dir}') but it is not a valid directory. Skipping.")
