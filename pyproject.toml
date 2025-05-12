@@ -24,6 +24,7 @@ pyarrow-hotfix = "^0.7"
 lxml = "^5.4.0"
 datasets = "2.16.0"
 python-xz = "^0.5.0"
+pyyaml = "^6.0.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

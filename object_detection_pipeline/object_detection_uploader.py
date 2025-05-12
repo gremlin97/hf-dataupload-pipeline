@@ -357,7 +357,7 @@ class ObjectDetectionUploader:
             
             # Get all image files
             image_files = []
-            for ext in ['.jpg', '.jpeg', '.png']:
+            for ext in ['.jpg', '.jpeg', '.png', '.tif', '.tiff']:
                 image_files.extend(glob.glob(os.path.join(images_dir, f'*{ext}')))
             
             # Create dataset examples
