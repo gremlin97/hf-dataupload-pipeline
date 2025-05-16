@@ -56,7 +56,7 @@ def coco_annotation_features():
             'category_id': Value('int64'),
             'bbox': Sequence(Value('float32')),
             'area': Value('float32'),
-            'iscrowd': Value('int64')
+            # 'iscrowd': Value('int64')
         })
     }
 
@@ -70,6 +70,7 @@ class ObjectDetectionUploader:
         token: Optional[str] = None,
         format: str = "coco",  # "coco" or "yolo"
         config_file: Optional[str] = None,
+        partition_dir: Optional[str] = None,
         private: bool = False,
         include_pascal_voc: bool = False,
         include_coco: bool = False,
@@ -94,6 +95,7 @@ class ObjectDetectionUploader:
         self.token = token or HfFolder.get_token()
         self.format = format.lower()
         self.config_file = config_file
+        self.partition_dir = partition_dir
         self.private = private
         self.include_pascal_voc = include_pascal_voc
         self.include_coco = include_coco
@@ -675,7 +677,7 @@ class ObjectDetectionUploader:
                 'category_id': 1,  # Assuming single category
                 'bbox': [x, y, w, h],
                 'area': w * h,
-                'iscrowd': 0
+                # 'iscrowd': 0
             })
         
         result = {
@@ -793,7 +795,7 @@ class ObjectDetectionUploader:
                 'category_id': 1,  # Assuming single category
                 'bbox': [x, y, w, h],
                 'area': w * h,
-                'iscrowd': 0
+                # 'iscrowd': 0
             })
         
         return {
@@ -815,6 +817,249 @@ class ObjectDetectionUploader:
         else:
             raise ValueError(f"Unsupported format: {self.format}")
 
+    def create_partition_datasets(self) -> Dict[str, DatasetDict]:
+        """
+        Create datasets for each partition based on CSV files in the partition directory.
+        This is a separate function that creates datasets directly from the data directory,
+        without relying on the main dataset.
+        
+        Returns:
+            Dictionary of partition name to DatasetDict mappings
+        """
+        if not self.partition_dir or not os.path.isdir(self.partition_dir):
+            print(f"Warning: Partition directory {self.partition_dir} not found or not specified. Skipping partitions.")
+            return {}
+            
+        # Find all CSV files in the partition directory
+        csv_files = glob.glob(os.path.join(self.partition_dir, "*.csv"))
+        if not csv_files:
+            print(f"Warning: No CSV files found in partition directory {self.partition_dir}. Skipping partitions.")
+            return {}
+            
+        partition_datasets = {}
+        
+        # Process each CSV file as a partition
+        for csv_file in csv_files:
+            partition_name = os.path.splitext(os.path.basename(csv_file))[0]
+            print(f"Processing partition: {partition_name}")
+            
+            try:
+                # Read the CSV file
+                df = pd.read_csv(csv_file)
+                
+                # Check if the CSV has the required columns
+                if 'file_id' not in df.columns or 'split' not in df.columns:
+                    print(f"Warning: CSV file {csv_file} does not have required columns 'file_id' and 'split'. Skipping.")
+                    continue
+                    
+                # Create a new DatasetDict for this partition
+                partition_dict = {}
+                
+                # Group by split
+                for split, group in df.groupby('split'):
+                    # Get file IDs for this split and partition
+                    file_ids = set(group['file_id'].tolist())
+                    
+                    # Determine the images directory for this split
+                    if self.format == "coco":
+                        images_dir = os.path.join(self.data_dir, split, 'images')
+                    elif self.format == "yolo":
+                        # For YOLO format, get the path from the config file
+                        with open(self.config_file, 'r') as f:
+                            config = yaml.safe_load(f)
+                        
+                        split_path = config.get(split)
+                        if not split_path:
+                            print(f"Warning: Path for {split} not found in config. Skipping.")
+                            continue
+                        
+                        # Resolve split path
+                        if os.path.isabs(split_path):
+                            images_dir = split_path
+                        else:
+                            # Handle relative paths in config
+                            base_path = os.path.dirname(self.config_file)
+                            images_dir = os.path.normpath(os.path.join(base_path, split_path))
+                    else:
+                        print(f"Warning: Unsupported format {self.format}. Skipping.")
+                        continue
+                    
+                    # Check if the images directory exists
+                    if not os.path.isdir(images_dir):
+                        print(f"Warning: Images directory {images_dir} not found. Skipping.")
+                        continue
+                    
+                    # Get the labels directory
+                    labels_dir = images_dir.replace('images', 'labels')
+                    
+                    # Collect examples for this partition
+                    examples = []
+                    
+                    # For each file ID in this partition
+                    for file_id in file_ids:
+                        # Find the image file
+                        image_path = os.path.join(images_dir, file_id)
+                        if not os.path.exists(image_path):
+                            print(f"Warning: Image file {image_path} not found. Skipping.")
+                            continue
+                        
+                        # Get image dimensions
+                        try:
+                            with PILImage.open(image_path) as img:
+                                width, height = img.size
+                        except Exception as e:
+                            print(f"Warning: Could not read image dimensions for {image_path}: {e}. Skipping.")
+                            continue
+                        
+                        # Create a basic example
+                        example = {
+                            'image': image_path,
+                            'width': width,
+                            'height': height
+                        }
+                        
+                        # Add annotations based on format
+                        if self.format == "yolo":
+                            # Get the label file
+                            base_filename = os.path.splitext(file_id)[0]
+                            label_path = os.path.join(labels_dir, base_filename + '.txt')
+                            
+                            if os.path.exists(label_path):
+                                # Read class names from config
+                                with open(self.config_file, 'r') as f:
+                                    config = yaml.safe_load(f)
+                                class_names = config.get('names', [])
+                                
+                                # Collect bounding boxes and categories for conversion
+                                yolo_boxes = []
+                                categories = []
+                                
+                                with open(label_path, 'r') as f:
+                                    for line in f:
+                                        parts = line.strip().split()
+                                        if len(parts) >= 5:
+                                            class_id = int(parts[0])
+                                            if class_id < len(class_names):
+                                                x_center, y_center, box_width, box_height = map(float, parts[1:5])
+                                                yolo_boxes.append([x_center, y_center, box_width, box_height])
+                                                categories.append(class_names[class_id])
+                                
+                                # Add YOLO annotations if requested
+                                if self.include_yolo:
+                                    yolo_dict = {"bbox": [], "category": []}
+                                    for box, category in zip(yolo_boxes, categories):
+                                        yolo_dict["bbox"].append(box)
+                                        yolo_dict["category"].append(category)
+                                    example['yolo_annotation'] = yolo_dict
+                                
+                                # Add COCO annotations if requested
+                                if self.include_coco:
+                                    # Create a unique image ID (can be the hash of the filename)
+                                    import hashlib
+                                    image_id = int(hashlib.md5(file_id.encode()).hexdigest(), 16) % (10 ** 10)
+                                    
+                                    # Convert YOLO boxes to COCO format
+                                    coco_annotations = []
+                                    for i, (box, category) in enumerate(zip(yolo_boxes, categories)):
+                                        x_center, y_center, box_width, box_height = box
+                                        
+                                        # Convert normalized YOLO to COCO format [x, y, width, height]
+                                        x = (x_center - box_width/2) * width
+                                        y = (y_center - box_height/2) * height
+                                        w = box_width * width
+                                        h = box_height * height
+                                        
+                                        # Get category ID (using index in class_names)
+                                        category_id = class_names.index(category)
+                                        
+                                        # Calculate area
+                                        area = w * h
+                                        
+                                        coco_annotations.append({
+                                            'id': i + 1,  # Annotation ID
+                                            'image_id': image_id,
+                                            'category_id': category_id,
+                                            'bbox': [float(x), float(y), float(w), float(h)],
+                                            'area': float(area)
+                                        })
+                                    
+                                    example['coco_annotation'] = {
+                                        'image_id': image_id,
+                                        'annotations': coco_annotations
+                                    }
+                                
+                                # Add Pascal VOC annotations if requested
+                                if self.include_pascal_voc:
+                                    # Convert YOLO boxes to Pascal VOC format
+                                    pascal_objects = []
+                                    for box, category in zip(yolo_boxes, categories):
+                                        x_center, y_center, box_width, box_height = box
+                                        
+                                        # Convert normalized YOLO to absolute coordinates
+                                        x_min = int((x_center - box_width/2) * width)
+                                        y_min = int((y_center - box_height/2) * height)
+                                        x_max = int((x_center + box_width/2) * width)
+                                        y_max = int((y_center + box_height/2) * height)
+                                        
+                                        pascal_objects.append({
+                                            'name': category,
+                                            'difficult': 0,
+                                            'bbox': {
+                                                'xmin': x_min,
+                                                'ymin': y_min,
+                                                'xmax': x_max,
+                                                'ymax': y_max
+                                            }
+                                        })
+                                    
+                                    example['pascal_voc_annotation'] = {
+                                        'filename': file_id,
+                                        'size': {
+                                            'width': width,
+                                            'height': height,
+                                            'depth': 3
+                                        },
+                                        'objects': pascal_objects
+                                    }
+                            
+                        examples.append(example)
+                    
+                    # Create dataset for this split if we have examples
+                    if examples:
+                        # Define features based on what's included
+                        features = Features({
+                            'image': Image(),
+                            'width': Value('int64'),
+                            'height': Value('int64')
+                        })
+                        
+                        # Add additional features based on what's included
+                        if self.include_yolo:
+                            features['yolo_annotation'] = yolo_features()
+                        
+                        if self.include_coco:
+                            features['coco_annotation'] = coco_annotation_features()
+                        
+                        if self.include_pascal_voc:
+                            features['pascal_voc_annotation'] = pascal_voc_features()
+                        
+                        # Create the dataset
+                        partition_dict[split] = Dataset.from_list(examples, features=features)
+                        print(f"  Created {split} dataset for partition {partition_name} with {len(examples)} examples")
+                    else:
+                        print(f"  Warning: No examples found for split {split} in partition {partition_name}")
+                
+                # Add the partition dataset if we have any splits
+                if partition_dict:
+                    partition_datasets[partition_name] = DatasetDict(partition_dict)
+                
+            except Exception as e:
+                print(f"Error processing partition {partition_name}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        return partition_datasets
+    
     def upload(self, dataset_dict: Optional[DatasetDict] = None) -> None:
         """
         Upload the dataset to Hugging Face.
@@ -829,7 +1074,12 @@ class ObjectDetectionUploader:
         if not dataset_dict:
             print("Error: No datasets to upload. Please check your data directory and format.")
             return
-        
+            
+        # Create partition datasets if partition directory is specified
+        partition_datasets = {}
+        if self.partition_dir:
+            partition_datasets = self.create_partition_datasets()
+            
         # Create repository if it doesn't exist
         try:
             self.api.create_repo(
@@ -948,6 +1198,156 @@ An object detection dataset in {format_name} format containing {len(splits)} spl
                 
         except Exception as e:
             print(f"Error uploading dataset: {e}")
+            
+        # Upload partition datasets if available
+        if partition_datasets:
+            print("\nUploading partition datasets to the main dataset...")
+            
+            # Create a combined dataset dictionary with all partitions
+            # We need to create a new DatasetDict, not just copy the dictionary
+            combined_dataset_dict = DatasetDict()
+            
+            # First add the original splits
+            for split_name, split_dataset in dataset_dict.items():
+                combined_dataset_dict[split_name] = split_dataset
+            
+            # Add each partition as a new split in the main dataset
+            for partition_name, partition_dict in partition_datasets.items():
+                print(f"Processing partition: {partition_name}")
+                
+                try:
+                    # Combine all examples from all splits in this partition into a single dataset
+                    all_examples = []
+                    total_examples = 0
+                    
+                    # Collect examples from each split
+                    for split_name, split_dataset in partition_dict.items():
+                        # Convert the dataset to a list of examples
+                        examples = list(split_dataset)
+                        all_examples.extend(examples)
+                        total_examples += len(examples)
+                    
+                    # If we have examples, create a single dataset for this partition
+                    if all_examples:
+                        # Get features from one of the splits
+                        features = next(iter(partition_dict.values())).features
+                        
+                        # Create a new dataset with all examples
+                        combined_dataset = Dataset.from_list(all_examples, features=features)
+                        
+                        # Add this as a single split named after the partition
+                        combined_dataset_dict[partition_name] = combined_dataset
+                        print(f"  Added {partition_name} split with {total_examples} examples")
+                        
+                except Exception as e:
+                    print(f"Error processing partition {partition_name}: {e}")
+            
+            # Push the combined dataset to Hub
+            try:
+                print("Uploading combined dataset with partitions...")
+                combined_dataset_dict.push_to_hub(
+                    self.dataset_name,
+                    token=self.token,
+                    private=self.private
+                )
+                print(f"Successfully uploaded combined dataset with partitions to {self.dataset_name}")
+                
+                # Update the README to include information about partitions
+                format_name = "COCO" if self.format == "coco" else "YOLO"
+                splits = list(combined_dataset_dict.keys())
+                
+                # Get current date for metadata
+                from datetime import datetime
+                current_date = datetime.now().strftime("%Y-%m-%d")
+                
+                # Get the basename of the dataset
+                dataset_basename = os.path.basename(self.dataset_name)
+                
+                # Create basic YAML frontmatter
+                readme_content = f"""---
+annotations_creators:
+- expert-generated
+language_creators:
+- found
+language:
+- en
+license:
+- cc-by-4.0
+multilinguality:
+- monolingual
+size_categories:
+- 10K<n<100K
+source_datasets:
+- original
+task_categories:
+- object-detection
+task_ids:
+- instance-segmentation
+pretty_name: {dataset_basename}
+---
+
+# {dataset_basename} Dataset
+
+An object detection dataset in {format_name} format containing {len(splits)} splits: {', '.join(splits)}.
+
+## Dataset Metadata
+
+* **License:** CC-BY-4.0 (Creative Commons Attribution 4.0 International)
+* **Version:** 1.0
+* **Date Published:** {current_date}
+* **Cite As:** TBD
+
+## Dataset Details
+
+- Format: {format_name}
+- Splits: {', '.join(splits)}
+
+## Partitions
+
+This dataset includes the following partitions:
+"""
+                
+                # Add information about partitions
+                for partition_name in partition_datasets.keys():
+                    readme_content += f"- {partition_name}: Available as a single split named '{partition_name}'\n"
+                
+                # Add information about additional formats
+                additional_formats = []
+                if self.include_coco and self.format != "coco":
+                    additional_formats.append("COCO format annotations")
+                if self.include_pascal_voc:
+                    additional_formats.append("Pascal VOC format annotations")
+                if self.include_yolo and self.format != "yolo":
+                    additional_formats.append("YOLO format annotations")
+                    
+                if additional_formats:
+                    readme_content += "\n## Additional Formats\n\n"
+                    for fmt in additional_formats:
+                        readme_content += f"- Includes {fmt}\n"
+                
+                readme_content += "\n\n## Usage\n\n```python\nfrom datasets import load_dataset\n\n# Load the main dataset\ndataset = load_dataset(\""
+                readme_content += self.dataset_name
+                readme_content += "\")\n\n# Load a specific partition\npartition_dataset = load_dataset(\""
+                readme_content += self.dataset_name
+                readme_content += "\", \"0.05x_partition\")\n```\n"
+                
+                with open("README.md", "w") as f:
+                    f.write(readme_content)
+                
+                self.api.upload_file(
+                    path_or_fileobj="README.md",
+                    path_in_repo="README.md",
+                    repo_id=self.dataset_name,
+                    repo_type="dataset"
+                )
+                print("Updated dataset card with partition information.")
+                
+                # Clean up temporary files
+                if os.path.exists("README.md"):
+                    os.remove("README.md")
+                    
+            except Exception as e:
+                print(f"Error uploading combined dataset: {e}")
 
 def main():
     """Command-line interface for the Object Detection Uploader."""
@@ -966,6 +1366,7 @@ def main():
     parser.add_argument("--format", choices=["coco", "yolo"], default="coco",
                        help="Format of annotations (default: coco)")
     parser.add_argument("--config_file", help="Path to configuration file for YOLO format")
+    parser.add_argument("--partition-dir", help="Path to partition directory")
     parser.add_argument("--private", action="store_true", help="Make dataset private")
     parser.add_argument("--include_pascal_voc", action="store_true", 
                        help="Include Pascal VOC format annotations as a column")
@@ -983,6 +1384,7 @@ def main():
         token=args.token,
         format=args.format,
         config_file=args.config_file,
+        partition_dir=args.partition_dir,
         private=args.private,
         include_pascal_voc=args.include_pascal_voc,
         include_coco=args.include_coco,
